@@ -13,6 +13,12 @@ from sklearn.utils.multiclass import unique_labels
 from sklearn.metrics.pairwise import chi2_kernel
 from sklearn.model_selection import GridSearchCV
 from sklearn.metrics import accuracy_score
+from skimage.feature import graycomatrix, graycoprops
+
+
+def setSeed(seed):
+    np.random.seed(seed)
+    cv2.setRNGSeed(seed)
 
 def getFiles(train, path):
     images = []
@@ -55,6 +61,31 @@ def extractFeatures(kmeans, descriptor_list, image_count, no_clusters):
             im_features[i][idx] += 1
 
     return im_features
+
+def extractGLCMFeatures(images):
+    contrast = []
+    homogeneity = []
+    energy = []
+    correlation = []
+
+    for img in images:
+        glcm = graycomatrix(img, [1], [0, np.pi/4, np.pi/2, 3*np.pi/4, np.pi], levels=256, normed=True, symmetric=False)
+        contrast_grid = graycoprops(glcm, 'contrast')
+        contrast.append([contrast_grid[0,i] for i in range(5)])
+        homogeneity_grid = graycoprops(glcm, 'homogeneity')
+        homogeneity.append([homogeneity_grid[0,i] for i in range(5)])
+        energy_grid = graycoprops(glcm, 'energy')
+        energy.append([energy_grid[0,i] for i in range(5)])
+        correlation_grid = graycoprops(glcm, 'correlation')
+        correlation.append([correlation_grid[0,i] for i in range(5)])
+
+    contrast = np.array(contrast)
+    homogeneity = np.array(homogeneity)
+    energy = np.array(energy)
+    correlation = np.array(correlation)
+
+    glcm_features = np.hstack((contrast, homogeneity, energy, correlation))
+    return glcm_features 
 
 def normalizeFeatures(scale, features):
     return scale.transform(features)
@@ -157,12 +188,14 @@ def plotConfusions(true, predictions):
 
 def findAccuracy(true, predictions):
     print ('accuracy score: %0.3f' % accuracy_score(true, predictions))
+    return accuracy_score(true, predictions)
 
-def trainModel(path, no_clusters, kernel):
+def trainModel(path, no_clusters, kernel, glcm_features = False):
     images = getFiles(True, path)
     print("Train images path detected.")
     sift = cv2.xfeatures2d.SIFT_create()
     descriptor_list = []
+    all_images = []
     train_labels = np.array([])
     label_count = 7
     image_count = len(images)
@@ -179,12 +212,13 @@ def trainModel(path, no_clusters, kernel):
         elif("house_indoor" in img_path):
             class_index = 4
         elif("office" in img_path):
-          class_index = 5
+            class_index = 5
         else:
-          class_index = 6
+            class_index = 6
 
         train_labels = np.append(train_labels, class_index)
         img = readImage(img_path)
+        all_images.append(img)
         des = getDescriptors(sift, img)
         descriptor_list.append(des)
 
@@ -197,7 +231,14 @@ def trainModel(path, no_clusters, kernel):
     im_features = extractFeatures(kmeans, descriptor_list, image_count, no_clusters)
     print("Images features extracted.")
 
-    scale = StandardScaler().fit(im_features)        
+    if glcm_features:
+        glcm_features = extractGLCMFeatures(all_images)
+        print("GLCM features extracted.")
+
+        im_features = np.hstack((im_features, glcm_features))
+        print("GLCM features added to image features.")
+
+    scale = StandardScaler().fit(im_features)
     im_features = scale.transform(im_features)
     print("Train images normalized.")
 
@@ -210,13 +251,14 @@ def trainModel(path, no_clusters, kernel):
 
     return kmeans, scale, svm, im_features
 
-def testModel(path, kmeans, scale, svm, im_features, no_clusters, kernel):
+def testModel(path, kmeans, scale, svm, im_features, no_clusters, kernel, glcm_features = False):
     test_images = getFiles(False, path)
     print("Test images path detected.")
 
     count = 0
     true = []
     descriptor_list = []
+    all_images = []
 
     name_dict =	{
         "0": "city",
@@ -236,6 +278,7 @@ def testModel(path, kmeans, scale, svm, im_features, no_clusters, kernel):
 
         if(des is not None):
             count += 1
+            all_images.append(img)
             descriptor_list.append(des)
 
             if("city" in img_path):
@@ -257,6 +300,10 @@ def testModel(path, kmeans, scale, svm, im_features, no_clusters, kernel):
 
     test_features = extractFeatures(kmeans, descriptor_list, count, no_clusters)
 
+    if glcm_features:
+        glcm_features = extractGLCMFeatures(all_images)
+        test_features = np.hstack((test_features, glcm_features))
+
     test_features = scale.transform(test_features)
     
     kernel_test = test_features
@@ -269,13 +316,17 @@ def testModel(path, kmeans, scale, svm, im_features, no_clusters, kernel):
     plotConfusions(true, predictions)
     print("Confusion matrixes plotted.")
 
-    findAccuracy(true, predictions)
+    accuracy_score = findAccuracy(true, predictions)
     print("Accuracy calculated.")
     print("Execution done.")
 
-def execute(train_path, test_path, no_clusters, kernel):
-    kmeans, scale, svm, im_features = trainModel(train_path, no_clusters, kernel)
-    testModel(test_path, kmeans, scale, svm, im_features, no_clusters, kernel)
+    return accuracy_score
+
+def execute(train_path, test_path, no_clusters, kernel, glcm_features = False):
+    setSeed(42)
+    kmeans, scale, svm, im_features = trainModel(train_path, no_clusters, kernel, glcm_features)
+    accuracy_score = testModel(test_path, kmeans, scale, svm, im_features, no_clusters, kernel, glcm_features)
+    return accuracy_score
 
 if __name__ == '__main__':
 
@@ -283,12 +334,59 @@ if __name__ == '__main__':
 
     parser.add_argument('--train_path', action="store", dest="train_path", required=True)
     parser.add_argument('--test_path', action="store", dest="test_path", required=True)
+    parser.add_argument('--list_clusters', action="store_true", dest="list_clusters", default=False)
     parser.add_argument('--no_clusters', action="store", dest="no_clusters", default=50)
     parser.add_argument('--kernel_type', action="store", dest="kernel_type", default="linear")
+    parser.add_argument('--glcm_features', action="store_true", dest="glcm_features", default=False)
+    parser.add_argument('--cmp_plot', action="store_true", dest="cmp_plot", default=False)
 
     args =  vars(parser.parse_args())
     if(not(args['kernel_type'] == "linear" or args['kernel_type'] == "precomputed")):
         print("Kernel type must be either linear or precomputed")
         exit(0)
+    
+    if(args['list_clusters'] is True):
+        clusters = list(map(int, args['no_clusters'].split(',')))
+        accuracy_scores = []
+        for cluster in clusters:
+            print("Number of clusters: ", cluster)
+            accuracy_scores.append(execute(args['train_path'], args['test_path'], cluster, args['kernel_type'], args['glcm_features']))
+        plt.plot(clusters, accuracy_scores, ls='-', marker='*', c='hotpink', ms=12, mec='g', label='Accuracy')
+        plt.xlabel("Number of clusters")
+        plt.ylabel("Accuracy")
+        plt.title("Accuracy vs Number of clusters")
+        plt.grid(axis='y', alpha=0.75, ls='--', c='c', lw=0.5)
+        plt.legend(loc='best')
+        plt.savefig('kvar.png')
+        plt.clf()
+        if args['cmp_plot']:
+            if args['glcm_features']:
+                new_accuracy_scores = []
+                for cluster in clusters:
+                    print("Number of clusters: ", cluster)
+                    new_accuracy_scores.append(execute(args['train_path'], args['test_path'], cluster, args['kernel_type'], False))
+                plt.plot(clusters, new_accuracy_scores, ls='-', marker='*', c='hotpink', ms=12, mec='g', label='Without GLCM')
+                plt.plot(clusters, accuracy_scores, ls='-', marker='X', c='teal', ms=12, mec='orchid', label='With GLCM')
+                plt.xlabel("Number of clusters")
+                plt.ylabel("Accuracy")
+                plt.title("Accuracy vs Number of clusters")
+                plt.grid(axis='y', alpha=0.75, ls='--', c='c', lw=0.5)
+                plt.legend(loc='best')
+                plt.savefig('cmp_plot.png')
+            else:
+                new_accuracy_scores = []
+                for cluster in clusters:
+                    print("Number of clusters: ", cluster)
+                    new_accuracy_scores.append(execute(args['train_path'], args['test_path'], cluster, args['kernel_type'], True))
+                plt.plot(clusters, accuracy_scores, ls='-', marker='*', c='hotpink', ms=12, mec='g', label='Without GLCM')
+                plt.plot(clusters, new_accuracy_scores, ls='-', marker='X', c='teal', ms=12, mec='orchid', label='With GLCM')
+                plt.xlabel("Number of clusters")
+                plt.ylabel("Accuracy")
+                plt.title("Accuracy vs Number of clusters")
+                plt.grid(axis='y', alpha=0.75, ls='--', c='c', lw=0.5)
+                plt.legend(loc='best')
+                plt.savefig('cmp_plot.png')
 
-    execute(args['train_path'], args['test_path'], int(args['no_clusters']), args['kernel_type'])
+    else:
+        clusters = int(args['no_clusters'])
+        execute(args['train_path'], args['test_path'], clusters, args['kernel_type'], args['glcm_features'])
