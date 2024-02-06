@@ -17,6 +17,9 @@ def forward_pass(X, W1, W2):
 def calculate_loss(Z2, Y):
     return 0.5 * np.sum((Z2 - Y) ** 2)
 
+def calculate_mse(weights1, weights2):
+    return np.mean((weights1 - weights2) ** 2)
+
 def backward_pass(X, Z1, A2, Z2, Y, W2):
     m = X.shape[0]
 
@@ -88,15 +91,21 @@ for epsilon in epsilon_values:
     numerical_gradients = numerical_gradient_check(X, Y, W1, W2, epsilon)
 
     # Calculate accuracy
-    accuracy = np.allclose(dW1, numerical_gradients[0]) and np.allclose(dW2, numerical_gradients[1])
-    accuracy_values.append(accuracy)
+    # accuracy = np.allclose(dW1, numerical_gradients[0]) and np.allclose(dW2, numerical_gradients[1])
+     # Calculate MSE
+    mse_w1 = calculate_mse(dW1, numerical_gradients[0])
+    mse_w2 = calculate_mse(dW2, numerical_gradients[1])
+    accuracy_values.append(np.log((mse_w1 + mse_w2) / 2))
+    print(np.log((mse_w1 + mse_w2) / 2))
+    # accuracy_values.append(mse_values)
 
 # Plotting
 plt.figure(figsize=(10, 6))
 plt.semilogx(epsilon_values, accuracy_values, marker='o', linestyle='-')
-plt.title('Numerical Gradient Accuracy vs. Epsilon')
+plt.title('Numerical Gradient Error vs. Epsilon')
 plt.xlabel('Epsilon')
-plt.ylabel('Accuracy')
+plt.ylabel('Log of Error')
+plt.ylim(-60, -10) 
 plt.grid(True)
 plt.show()
 
