@@ -8,6 +8,8 @@ import os
 from tqdm import tqdm
 import torchvision.models as models
 from torch.utils.data import DataLoader, TensorDataset
+import torchvision.transforms as transforms
+from PIL import Image
 
 # Set seed
 seed = 42
@@ -29,7 +31,7 @@ train = []
 test = []
 images = []
 labels = []
-gpus = [0,1,2,3,4]
+gpus = [0,3]
 train_losses = []
 test_losses = []
 accuracy = []
@@ -37,8 +39,8 @@ i=0
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 saved = 1
 batch_size = 128
-epoch_count = 50
-model_name = "mobilenet_v2"
+epoch_count = 20
+model_name = "efficientnet_b0"
 
 # Load images and set labels
 if not saved:
@@ -48,8 +50,7 @@ if not saved:
             np_img = cv2.cvtColor(np_img, cv2.COLOR_BGR2RGB)
             np_img = cv2.resize(np_img, (224, 224))
             np_img = np.array(np_img)
-            np_img = np.transpose(np_img, (2, 0, 1)) 
-            np_img = np_img.astype('float32')
+            np_img = np_img.astype('uint8')
             images.append(np_img)
             labels.append(i)
         i+=1
@@ -79,6 +80,25 @@ y_test = [labels[i] for i in test]
 print("Train size: ", len(X_train))
 print("Test size: ", len(X_test))
 
+# Transform data
+transform_1 = transforms.Compose([
+    transforms.ToTensor()
+])
+
+transform_2 = transforms.Compose([
+    transforms.RandomRotation(degrees=15),
+    transforms.RandomHorizontalFlip(),
+    transforms.RandomResizedCrop(size=224, scale=(0.8, 1.0)),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+])
+
+# Apply transform to data
+X_train = [transform_2(Image.fromarray(x)) for x in X_train]
+X_test = [transform_2(Image.fromarray(x)) for x in X_test]
+y_train = y_train
+y_test = y_test
+
 # Convert to tensor
 X_train, y_train = torch.tensor(np.array(X_train), dtype=torch.float32), torch.tensor(np.array(y_train), dtype=torch.int32)
 X_test, y_test = torch.tensor(np.array(X_test), dtype=torch.float32), torch.tensor(np.array(y_test), dtype=torch.int32)
@@ -87,12 +107,38 @@ X_test, y_test = torch.tensor(np.array(X_test), dtype=torch.float32), torch.tens
 train_loader = DataLoader(TensorDataset(X_train, y_train), batch_size=batch_size, shuffle=True, num_workers=len(gpus))
 test_loader = DataLoader(TensorDataset(X_test, y_test), batch_size=batch_size, shuffle=False, num_workers=len(gpus))
 
-# Resnet-18 Model
-model = models.mobilenet_v2(pretrained=True)
-for param in model.parameters():
-    param.requires_grad = False
-last_filter = model.classifier[1].in_features
-model.classifier[1] = nn.Linear(last_filter, len(class_labels))
+# Create model
+print("Model:", model_name)
+if model_name == "resnet18":
+    model = models.resnet18(pretrained=True)
+    for param in model.parameters():
+        param.requires_grad = False
+    last_filter = model.fc.in_features
+    model.fc = nn.Linear(last_filter, 200)
+elif model_name == "mobilenet_v2":
+    model = models.mobilenet_v2(pretrained=True)
+    for param in model.parameters():
+        param.requires_grad = False
+    last_filter = model.classifier[1].in_features
+    model.classifier[1] = nn.Linear(last_filter, len(class_labels))
+elif model_name == "efficientnet_b0":
+    model = models.efficientnet_b0(pretrained=True)
+    for param in model.parameters():
+        param.requires_grad = False
+    last_filter = model.classifier[1].in_features
+    model.classifier[1] = nn.Sequential(
+        nn.Linear(last_filter, 512), 
+        nn.ReLU(),
+        nn.Dropout(0.5),
+        nn.Linear(512, 200)
+    )
+elif model_name == "efficientnet_b1":
+    model = models.efficientnet_b1(pretrained=True)
+    for param in model.parameters():
+        param.requires_grad = False
+    last_filter = model.classifier[1].in_features
+    model.classifier[1] = nn.Linear(last_filter, 200)
+
 nn.DataParallel(model, device_ids=gpus)
 model = model.to(device)
 print("Model created")
@@ -103,8 +149,9 @@ with open(results_path + f"{model_name}.txt", "w") as file:
     file.write(f"Trainable number of parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad)}\n")
 print("Total number of parameters: ", sum(p.numel() for p in model.parameters()))
 print("Trainable number of parameters: ", sum(p.numel() for p in model.parameters() if p.requires_grad))
+
 loss_fn = nn.CrossEntropyLoss()
-optimizer = optim.Adam(model.parameters(), lr=0.001)
+optimizer = optim.Adam(model.parameters(), lr=0.001, betas=(0.9, 0.999))
 
 # Train model
 best_loss = int(1e9)
