@@ -21,6 +21,7 @@ torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
 # Parameters
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 dataset_path = "dataset/CUB_200_2011/images"
 train_test_split_file = "dataset/CUB_200_2011/train_test_split.txt"
 results_path = "results/"
@@ -31,7 +32,7 @@ train = []
 test = []
 images = []
 labels = []
-gpus = [0,3]
+gpus = [1]
 train_losses = []
 test_losses = []
 accuracy = []
@@ -40,7 +41,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 saved = 1
 batch_size = 128
 epoch_count = 20
-model_name = "efficientnet_b0"
+model_name = "dense_net_121"
 
 # Load images and set labels
 if not saved:
@@ -94,18 +95,21 @@ transform_2 = transforms.Compose([
 ])
 
 # Apply transform to data
+# X_train = [transform_1(Image.fromarray(x)) for x in X_train] + [transform_2(Image.fromarray(x)) for x in X_train]
 X_train = [transform_2(Image.fromarray(x)) for x in X_train]
-X_test = [transform_2(Image.fromarray(x)) for x in X_test]
+X_test = [transform_1(Image.fromarray(x)) for x in X_test]
+# y_train = y_train + y_train
 y_train = y_train
 y_test = y_test
+print("Data transformed")
 
 # Convert to tensor
 X_train, y_train = torch.tensor(np.array(X_train), dtype=torch.float32), torch.tensor(np.array(y_train), dtype=torch.int32)
 X_test, y_test = torch.tensor(np.array(X_test), dtype=torch.float32), torch.tensor(np.array(y_test), dtype=torch.int32)
 
 # Create dataloaders
-train_loader = DataLoader(TensorDataset(X_train, y_train), batch_size=batch_size, shuffle=True, num_workers=len(gpus))
-test_loader = DataLoader(TensorDataset(X_test, y_test), batch_size=batch_size, shuffle=False, num_workers=len(gpus))
+train_loader = DataLoader(TensorDataset(X_train, y_train), batch_size=batch_size, shuffle=True, num_workers=6)
+test_loader = DataLoader(TensorDataset(X_test, y_test), batch_size=batch_size, shuffle=False, num_workers=6)
 
 # Create model
 print("Model:", model_name)
@@ -114,7 +118,7 @@ if model_name == "resnet18":
     for param in model.parameters():
         param.requires_grad = False
     last_filter = model.fc.in_features
-    model.fc = nn.Linear(last_filter, 200)
+    model.fc = nn.Linear(last_filter, len(class_labels))
 elif model_name == "mobilenet_v2":
     model = models.mobilenet_v2(pretrained=True)
     for param in model.parameters():
@@ -126,20 +130,21 @@ elif model_name == "efficientnet_b0":
     for param in model.parameters():
         param.requires_grad = False
     last_filter = model.classifier[1].in_features
-    model.classifier[1] = nn.Sequential(
-        nn.Linear(last_filter, 512), 
-        nn.ReLU(),
-        nn.Dropout(0.5),
-        nn.Linear(512, 200)
-    )
+    model.classifier[1] = nn.Linear(last_filter, len(class_labels))
 elif model_name == "efficientnet_b1":
     model = models.efficientnet_b1(pretrained=True)
     for param in model.parameters():
         param.requires_grad = False
     last_filter = model.classifier[1].in_features
-    model.classifier[1] = nn.Linear(last_filter, 200)
+    model.classifier[1] = nn.Linear(last_filter,len(class_labels))
+elif model_name == "dense_net_121":
+    model = models.densenet121(pretrained=True)
+    for param in model.parameters():
+        param.requires_grad = False
+    last_filter = model.classifier.in_features
+    model.classifier = nn.Linear(last_filter,len(class_labels))
 
-nn.DataParallel(model, device_ids=gpus)
+# nn.DataParallel(model, device_ids=gpus)
 model = model.to(device)
 print("Model created")
 with open(results_path + f"{model_name}.txt", "w") as file:
