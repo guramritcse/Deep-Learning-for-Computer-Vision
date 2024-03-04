@@ -16,6 +16,8 @@ train = []
 test = []
 images = []
 labels = []
+train_loss = []
+test_loss = []
 i=0
 
 # Load images and set labels
@@ -39,11 +41,22 @@ print("Train size: ", len(X_train))
 print("Test size: ", len(X_test))
 
 # Convert to tensor
-train_loader = torch.utils.data.DataLoader(list(zip(X_train, y_train)), batch_size=128, shuffle=True)
-test_loader = torch.utils.data.DataLoader(list(zip(X_test, y_test)), batch_size=128, shuffle=False)
+X_train = np.array(X_train)
+X_test = np.array(X_test)
+y_train = np.array(y_train)
+y_test = np.array(y_test)
+X_train = torch.tensor(X_train)
+X_test = torch.tensor(X_test)
+y_train = torch.tensor(y_train)
+y_test = torch.tensor(y_test)
+
+# Create dataloaders
+train_loader = torch.utils.data.DataLoader(torch.utils.data.TensorDataset(X_train, y_train), batch_size=128, shuffle=True)
+test_loader = torch.utils.data.DataLoader(torch.utils.data.TensorDataset(X_test, y_test), batch_size=128, shuffle=False)
 
 # Model
-model = models.resnet50(weights="IMAGENET1K_V1")
+model = models.resnet50(pretrained=True)
+nn.DataParallel(model)
 for param in model.parameters():
     param.requires_grad = False
 last_filter = model.fc.in_features
@@ -52,7 +65,8 @@ loss_fn = nn.CrossEntropyLoss()
 optimizer = optim.Adam(model.parameters(), lr=0.001)
 
 # Train model
-for epoch in range(10):
+epoch_count = 10
+for epoch in range(epoch_count):
     running_loss = 0.0
     print(f"Current Epoch: {epoch + 1}")
     for inputs, labels in tqdm(train_loader):
@@ -63,6 +77,7 @@ for epoch in range(10):
         optimizer.step()
         running_loss += loss.item()
     print(f"[Epoch {epoch + 1}] loss: {running_loss / len(train_loader):.6f}")
+    train_loss.append(running_loss / len(train_loader))
 
 print("Training complete")
 
@@ -70,8 +85,7 @@ print("Training complete")
 correct = 0
 total = 0
 with torch.no_grad():
-    for data in test_loader:
-        images, labels = data
+    for inputs, labels in test_loader:
         outputs = model(images)
         _, predicted = torch.max(outputs.data, 1)
         total += labels.size(0)
@@ -81,3 +95,7 @@ print(f"Accuracy on the test images: {100 * correct / total:.4f}%")
 
 # Save model
 torch.save(model.state_dict(), "model.pth")
+
+# Plot training and test loss over epochs
+plt.plot(train_loss, label="Train Loss")
+
