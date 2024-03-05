@@ -10,6 +10,30 @@ import torchvision.models as models
 from torch.utils.data import DataLoader, TensorDataset
 import torchvision.transforms as transforms
 from PIL import Image
+import argparse
+
+parser = argparse.ArgumentParser()
+parser.add_argument('--test', action="store_true", default=False)
+parser.add_argument('--checkpoint', action="store", default=None)
+args = vars(parser.parse_args())
+
+# file paths and common test/train parameters
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+dataset_path = "dataset/CUB_200_2011/images"
+train_test_split_file = "dataset/CUB_200_2011/train_test_split.txt"
+image_id_file = "dataset/CUB_200_2011/images.txt"
+results_path = "results/"
+dict_images_id = {}
+dict_images_train_test = {}
+class_labels = [i for i in range(200)]
+X_train = []
+X_test = []
+y_train = []
+y_test = []
+i = 0
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+batch_size = 512
+loss_fn = nn.CrossEntropyLoss(label_smoothing=0.4)
 
 # Set seed
 seed = 42
@@ -20,32 +44,91 @@ torch.cuda.manual_seed_all(seed)
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
+if args["test"]:
+    if args["checkpoint"] is None:
+        print("no checkpoint provided")
+        exit(1)
+    model = models.densenet121(pretrained=True)
+    for param in model.parameters():
+        param.requires_grad = False
+    for param in model.features.transition3.parameters():
+        param.requires_grad = True
+    for param in model.features.denseblock4.parameters():
+        param.requires_grad = True
+    for param in model.features.norm5.parameters():
+        param.requires_grad = True
+    last_filter = model.classifier.in_features
+    model.classifier = nn.Linear(last_filter,200)
+    model.load_state_dict(torch.load(args["checkpoint"]))
+    model.to(device)
+    model.eval()
+    print("Model loaded")
+    print("Total number of parameters: ", sum(p.numel() for p in model.parameters()))
+    with open(image_id_file, "r") as file:
+        lines = file.readlines()
+        for line in lines:
+            line = line.split()
+            dict_images_id[int(line[0])] = line[1]
+    
+    with open(train_test_split_file, "r") as file:
+        lines = file.readlines()
+        for line in lines:
+            line = line.split()
+            dict_images_train_test[dict_images_id[int(line[0])]] = int(line[1])
+            
+    for dir in os.listdir(dataset_path):
+        for img in os.listdir(f"{dataset_path}/{dir}"):
+            np_img = cv2.imread(f"{dataset_path}/{dir}/{img}")
+            np_img = cv2.cvtColor(np_img, cv2.COLOR_BGR2RGB)
+            np_img = cv2.resize(np_img, (224, 224))
+            np_img = np.array(np_img)
+            np_img = np_img.astype('uint8')
+            if dict_images_train_test[f"{dir}/{img}"]==0:
+                X_test.append(np_img)
+                y_test.append(i)
+        i+=1
+
+    transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        ])
+    X_test = [transform(Image.fromarray(x)) for x in X_test]
+    y_test = y_test
+
+    print("Number of images in the test dataset: ", len(X_test))
+
+    X_test, y_test = torch.tensor(np.array(X_test), dtype=torch.float32), torch.tensor(np.array(y_test), dtype=torch.int32)
+
+    test_loader = DataLoader(TensorDataset(X_test, y_test), batch_size=batch_size, shuffle=False)
+
+    # Test model
+    correct = 0
+    total = 0
+    running_loss = 0.0
+    with torch.no_grad():
+        for inputs, labels in test_loader:
+            inputs = inputs.to(device)
+            labels = labels.type(torch.LongTensor)
+            labels = labels.to(device)
+            outputs = model(inputs)
+            loss = loss_fn(outputs, labels)
+            running_loss += loss.item()
+            _, predicted = torch.max(outputs, 1)
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
+    print(f"Accuracy on the test images: {100 * correct / total:.4f}%")
+    exit(0)
+
 # Parameters
-os.environ["CUDA_VISIBLE_DEVICES"] = "3"
-dataset_path = "dataset/CUB_200_2011/images"
-train_test_split_file = "dataset/CUB_200_2011/train_test_split.txt"
-image_id_file = "dataset/CUB_200_2011/images.txt"
-results_path = "results/"
 if not os.path.exists(results_path):
     os.makedirs(results_path)
-class_labels = [i for i in range(200)]
-X_train = []
-X_test = []
-y_train = []
-y_test = []
-gpus = [1]
 train_losses = []
 test_losses = []
 accuracy = []
-i = 0
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-saved = 1
-batch_size = 512
+saved = 0
 epoch_count = 20
 model_name = "dense_net_121_unfreeze"
 augmentation = 0
-dict_images_id = {}
-dict_images_train_test = {}
 
 # Load images and set labels
 if not saved:
@@ -106,7 +189,7 @@ transform_2 = transforms.Compose([
 # Apply transform to data
 if augmentation:
     X_train = [transform_1(Image.fromarray(x)) for x in X_train] + [transform_2(Image.fromarray(x)) for x in X_train]
-    y_train = y_train + y_train
+    y_train = [y for y in y_train] + [y for y in y_train]
 else:
     X_train = [transform_1(Image.fromarray(x)) for x in X_train]
     y_train = y_train
@@ -211,16 +294,15 @@ with open(results_path + f"{model_name}.txt", "w") as file:
 print("Total number of parameters: ", sum(p.numel() for p in model.parameters()))
 print("Trainable number of parameters: ", sum(p.numel() for p in model.parameters() if p.requires_grad))
 
-loss_fn = nn.CrossEntropyLoss(label_smoothing=0.4)
 optimizer = optim.Adam(model.parameters(), lr=0.003, betas=(0.9, 0.999))
-
 
 with open(results_path + f"{model_name}_{epoch_count}_log.txt", "w") as log_file:
     log_file.write(f"Batch size: {batch_size}\n")
-    # Train model
     best_loss = int(1e9)
     best_accuracy = 0
     for epoch in range(epoch_count):
+        # Train model
+        model.train()
         correct = 0
         total = 0
         running_loss = 0.0
@@ -244,6 +326,7 @@ with open(results_path + f"{model_name}_{epoch_count}_log.txt", "w") as log_file
         log_file.write(f"[Epoch {epoch + 1}] train accuracy: {100 * correct / total:.4f}%\n")
         train_losses.append(running_loss / len(train_loader))
         # Test model
+        model.eval()
         correct = 0
         total = 0
         running_loss = 0.0
