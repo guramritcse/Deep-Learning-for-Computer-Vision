@@ -36,12 +36,13 @@ gpus = [1]
 train_losses = []
 test_losses = []
 accuracy = []
-i=0
+i = 0
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 saved = 1
 batch_size = 128
-epoch_count = 20
+epoch_count = 50
 model_name = "dense_net_121"
+augmentation = 0
 
 # Load images and set labels
 if not saved:
@@ -83,7 +84,8 @@ print("Test size: ", len(X_test))
 
 # Transform data
 transform_1 = transforms.Compose([
-    transforms.ToTensor()
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 ])
 
 transform_2 = transforms.Compose([
@@ -95,11 +97,14 @@ transform_2 = transforms.Compose([
 ])
 
 # Apply transform to data
-# X_train = [transform_1(Image.fromarray(x)) for x in X_train] + [transform_2(Image.fromarray(x)) for x in X_train]
-X_train = [transform_2(Image.fromarray(x)) for x in X_train]
+if augmentation:
+    X_train = [transform_1(Image.fromarray(x)) for x in X_train] + [transform_2(Image.fromarray(x)) for x in X_train]
+    y_train = y_train + y_train
+else:
+    X_train = [transform_2(Image.fromarray(x)) for x in X_train]
+    y_train = y_train
+
 X_test = [transform_1(Image.fromarray(x)) for x in X_test]
-# y_train = y_train + y_train
-y_train = y_train
 y_test = y_test
 print("Data transformed")
 
@@ -143,6 +148,17 @@ elif model_name == "dense_net_121":
         param.requires_grad = False
     last_filter = model.classifier.in_features
     model.classifier = nn.Linear(last_filter,len(class_labels))
+elif model_name == "dense_net_121_classifier":
+    model = models.densenet121(pretrained=True)
+    for param in model.parameters():
+        param.requires_grad = False
+    last_filter = model.classifier.in_features
+    model.classifier = nn.Sequential(
+        nn.Linear(last_filter, 2048),
+        nn.ReLU(),
+        nn.Dropout(0.5),
+        nn.Linear(2048, len(class_labels))
+    )
 
 # nn.DataParallel(model, device_ids=gpus)
 model = model.to(device)
@@ -192,6 +208,8 @@ for epoch in range(epoch_count):
             correct += (predicted == labels).sum().item()
     accuracy.append(100 * correct / total)
     test_losses.append(running_loss / len(test_loader))
+    print(f"[Epoch {epoch + 1}] test loss: {running_loss / len(test_loader):.6f}")
+    print(f"[Epoch {epoch + 1}] accuracy: {100 * correct / total:.4f}%")
     if running_loss < best_loss:
         best_loss = running_loss
         torch.save(model.state_dict(), results_path + f"{model_name}_{epoch_count}_best_checkpoint.pth")
