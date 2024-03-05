@@ -500,4 +500,4 @@ DenseNet(
 )
 =============================================
 Total number of parameters: 7158856
-Trainable number of parameters: 2365128
+Trainable number of parameters: 2891464
