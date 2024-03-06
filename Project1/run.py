@@ -12,30 +12,31 @@ import torchvision.transforms as transforms
 from PIL import Image
 import argparse
 
+# Parser for command line arguments
 parser = argparse.ArgumentParser()
 parser.add_argument('--test', action="store_true", default=False)
 parser.add_argument('--checkpoint', action="store", default=None)
 args = vars(parser.parse_args())
 
-# file paths and common test/train parameters
+# File paths and common test/train parameters
 os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 dataset_path = "dataset/CUB_200_2011/images"
 train_test_split_file = "dataset/CUB_200_2011/train_test_split.txt"
 image_id_file = "dataset/CUB_200_2011/images.txt"
 results_path = "results/"
-dict_images_id = {}
-dict_images_train_test = {}
+dict_images_id = {}                     # {id: image_name}      
+dict_images_train_test = {}             # {image_name: 0/1} 0: test, 1: train
 class_labels = [i for i in range(200)]
 X_train = []
 X_test = []
 y_train = []
 y_test = []
-i = 0
+i = 0                                   # Class label
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 batch_size = 512
 loss_fn = nn.CrossEntropyLoss(label_smoothing=0.4)
 
-# Set seed
+# Set seed for reproducibility
 seed = 42
 np.random.seed(seed)
 torch.manual_seed(seed)
@@ -44,20 +45,24 @@ torch.cuda.manual_seed_all(seed)
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
+# Test model if --test flag is provided
 if args["test"]:
     if args["checkpoint"] is None:
         print("no checkpoint provided")
         exit(1)
+
     tokens = args["checkpoint"].split("/")
     tokens = tokens[-1].split("_")
     model_name = '_'.join(tokens[:-4]) if tokens[-2]!="last" else '_'.join(tokens[:-3])
     print("Model:", model_name)
+
     if model_name == "efficientnet_b0":
         model = models.efficientnet_b0(pretrained=True)
         for param in model.parameters():
             param.requires_grad = False
         last_filter = model.classifier[1].in_features
         model.classifier[1] = nn.Linear(last_filter, len(class_labels))
+
     elif model_name == "dense_net_121_unfreeze" or model_name == "dense_net_121_unfreeze_augmentation":
         model = models.densenet121(pretrained=True)
         for param in model.parameters():
@@ -71,6 +76,7 @@ if args["test"]:
         last_filter = model.classifier.in_features
         model.classifier = nn.Linear(last_filter,200)
     elif model_name == "dense_net_121_unfreeze_classifier" or model_name == "dense_net_121_unfreeze_classifier_augmentation":
+
         model = models.densenet121(pretrained=True)
         for param in model.parameters():
             param.requires_grad = False
@@ -90,11 +96,14 @@ if args["test"]:
         print("Model not found")
         exit(1)
 
+    # Load model from checkpoint 
     model.load_state_dict(torch.load(args["checkpoint"]))
     model.to(device)
     model.eval()
     print("Model loaded")
     print("Total number of parameters: ", sum(p.numel() for p in model.parameters()))
+
+    # Load test images
     with open(image_id_file, "r") as file:
         lines = file.readlines()
         for line in lines:
@@ -119,6 +128,7 @@ if args["test"]:
                 y_test.append(i)
         i+=1
 
+    # Normalize and convert to tensor
     transform = transforms.Compose([
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
@@ -130,9 +140,10 @@ if args["test"]:
 
     X_test, y_test = torch.tensor(np.array(X_test), dtype=torch.float32), torch.tensor(np.array(y_test), dtype=torch.int32)
 
+    # Create dataloader
     test_loader = DataLoader(TensorDataset(X_test, y_test), batch_size=batch_size, shuffle=False)
 
-    # Test model
+    # Test model on test images
     correct = 0
     total = 0
     running_loss = 0.0
@@ -150,19 +161,20 @@ if args["test"]:
     print(f"Accuracy on the test images: {100 * correct / total:.4f}%")
     exit(0)
 
-# Parameters
+# Other parameters for training
 if not os.path.exists(results_path):
     os.makedirs(results_path)
 train_losses = []
 test_losses = []
 train_accuracy = []
 test_accuracy = []
-saved = 0
+saved = 0                           # If set to 1, load images from numpy arrays instead of loading from the dataset
 epoch_count = 30
 model_name = "dense_net_121_unfreeze_augmentation"
-augmentation = 1
+augmentation = 1                    # If set to 1, apply data augmentation
 
-# Load images and set labels
+# Load images and labels
+# If the images are not saved as numpy arrays, load and save them so that we don't have to load them again
 if not saved:
     with open(image_id_file, "r") as file:
         lines = file.readlines()
@@ -204,7 +216,7 @@ print("Images loaded")
 print("Train size: ", len(X_train))
 print("Test size: ", len(X_test))
 
-# Transform data
+# Normalize and data augmentation
 transform_1 = transforms.Compose([
     transforms.ToTensor(),
     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
@@ -218,7 +230,7 @@ transform_2 = transforms.Compose([
     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 ])
 
-# Apply transform to data
+# Apply transformation and augmentation to the images
 if augmentation:
     X_train = [transform_1(Image.fromarray(x)) for x in X_train] + [transform_2(Image.fromarray(x)) for x in X_train]
     y_train = [y for y in y_train] + [y for y in y_train]
@@ -238,42 +250,49 @@ X_test, y_test = torch.tensor(np.array(X_test), dtype=torch.float32), torch.tens
 train_loader = DataLoader(TensorDataset(X_train, y_train), batch_size=batch_size, shuffle=True, num_workers=6)
 test_loader = DataLoader(TensorDataset(X_test, y_test), batch_size=batch_size, shuffle=False, num_workers=6)
 
-# Create model
+# Define model
 print("Model:", model_name)
+
 if model_name == "resnet18":
     model = models.resnet18(pretrained=True)
     for param in model.parameters():
         param.requires_grad = False
     last_filter = model.fc.in_features
     model.fc = nn.Linear(last_filter, len(class_labels))
+
 elif model_name == "mobilenet_v2":
     model = models.mobilenet_v2(pretrained=True)
     for param in model.parameters():
         param.requires_grad = False
     last_filter = model.classifier[1].in_features
     model.classifier[1] = nn.Linear(last_filter, len(class_labels))
+
 elif model_name == "efficientnet_b0":
     model = models.efficientnet_b0(pretrained=True)
     for param in model.parameters():
         param.requires_grad = False
     last_filter = model.classifier[1].in_features
     model.classifier[1] = nn.Linear(last_filter, len(class_labels))
+
 elif model_name == "efficientnet_b1":
     model = models.efficientnet_b1(pretrained=True)
     for param in model.parameters():
         param.requires_grad = False
     last_filter = model.classifier[1].in_features
     model.classifier[1] = nn.Linear(last_filter,len(class_labels))
+
 elif model_name == "dense_net_121":
     model = models.densenet121(pretrained=True)
     for param in model.parameters():
         param.requires_grad = False
     last_filter = model.classifier.in_features
     model.classifier = nn.Linear(last_filter,len(class_labels))
+
 elif model_name == "dense_net_121_finetune":
     model = models.densenet121(pretrained=True)
     last_filter = model.classifier.in_features
     model.classifier = nn.Linear(last_filter,len(class_labels))
+
 elif model_name == "dense_net_121_classifier":
     model = models.densenet121(pretrained=True)
     for param in model.parameters():
@@ -286,6 +305,7 @@ elif model_name == "dense_net_121_classifier":
         nn.Dropout(0.5),
         nn.Linear(512, len(class_labels))
     )
+
 elif model_name == "dense_net_121_unfreeze_classifier" or model_name == "dense_net_121_unfreeze_classifier_augmentation" :
     model = models.densenet121(pretrained=True)
     for param in model.parameters():
@@ -302,6 +322,7 @@ elif model_name == "dense_net_121_unfreeze_classifier" or model_name == "dense_n
         nn.Dropout(0.5),
         nn.Linear(512, len(class_labels))
     )
+
 elif model_name == "dense_net_121_unfreeze" or model_name == "dense_net_121_unfreeze_augmentation":
     model = models.densenet121(pretrained=True)
     for param in model.parameters():
@@ -315,9 +336,10 @@ elif model_name == "dense_net_121_unfreeze" or model_name == "dense_net_121_unfr
     last_filter = model.classifier.in_features
     model.classifier = nn.Linear(last_filter,len(class_labels))
 
-# nn.DataParallel(model, device_ids=gpus)
+# Move model to device
 model = model.to(device)
 print("Model created")
+# Save model details
 with open(results_path + f"{model_name}.txt", "w") as file:
     file.write(str(model))
     file.write("\n=============================================\n")
@@ -326,6 +348,7 @@ with open(results_path + f"{model_name}.txt", "w") as file:
 print("Total number of parameters: ", sum(p.numel() for p in model.parameters()))
 print("Trainable number of parameters: ", sum(p.numel() for p in model.parameters() if p.requires_grad))
 
+# Optimizer
 optimizer = optim.Adam(model.parameters(), lr=0.003, betas=(0.9, 0.999))
 
 with open(results_path + f"{model_name}_{epoch_count}_log.txt", "w") as log_file:
@@ -395,7 +418,7 @@ print(f"Final accuracy on the test images: {100 * correct / total:.4f}%")
 # Save model
 torch.save(model.state_dict(), results_path + f"{model_name}_{epoch_count}_last_checkpoint.pth")
 
-# Plot loss
+# Plot loss and accuracy
 plt.plot(np.arange(1, epoch_count+1), train_losses, label="Train Loss", ls='-', marker='o', c='hotpink', ms=6, mec='g')
 plt.plot(np.arange(1, epoch_count+1), test_losses, label="Test Loss", ls='-', marker='*', c='teal', ms=8, mec='orchid')
 plt.xlabel("Epoch")
