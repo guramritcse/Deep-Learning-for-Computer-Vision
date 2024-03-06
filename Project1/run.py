@@ -48,17 +48,48 @@ if args["test"]:
     if args["checkpoint"] is None:
         print("no checkpoint provided")
         exit(1)
-    model = models.densenet121(pretrained=True)
-    for param in model.parameters():
-        param.requires_grad = False
-    for param in model.features.transition3.parameters():
-        param.requires_grad = True
-    for param in model.features.denseblock4.parameters():
-        param.requires_grad = True
-    for param in model.features.norm5.parameters():
-        param.requires_grad = True
-    last_filter = model.classifier.in_features
-    model.classifier = nn.Linear(last_filter,200)
+    tokens = args["checkpoint"].split("/")
+    tokens = tokens[-1].split("_")
+    model_name = '_'.join(tokens[:-4]) if tokens[-2]!="last" else '_'.join(tokens[:-3])
+    print("Model:", model_name)
+    if model_name == "efficientnet_b0":
+        model = models.efficientnet_b0(pretrained=True)
+        for param in model.parameters():
+            param.requires_grad = False
+        last_filter = model.classifier[1].in_features
+        model.classifier[1] = nn.Linear(last_filter, len(class_labels))
+    elif model_name == "dense_net_121_unfreeze" or model_name == "dense_net_121_unfreeze_augmentation":
+        model = models.densenet121(pretrained=True)
+        for param in model.parameters():
+            param.requires_grad = False
+        for param in model.features.transition3.parameters():
+            param.requires_grad = True
+        for param in model.features.denseblock4.parameters():
+            param.requires_grad = True
+        for param in model.features.norm5.parameters():
+            param.requires_grad = True     
+        last_filter = model.classifier.in_features
+        model.classifier = nn.Linear(last_filter,200)
+    elif model_name == "dense_net_121_unfreeze_classifier" or model_name == "dense_net_121_unfreeze_classifier_augmentation":
+        model = models.densenet121(pretrained=True)
+        for param in model.parameters():
+            param.requires_grad = False
+        for param in model.features.denseblock4.parameters():
+            param.requires_grad = True
+        for param in model.features.norm5.parameters():
+            param.requires_grad = True
+        last_filter = model.classifier.in_features
+        model.classifier = nn.Sequential(
+            nn.Linear(last_filter, 512),
+            nn.BatchNorm1d(512),
+            nn.ReLU(),
+            nn.Dropout(0.5),
+            nn.Linear(512, len(class_labels))
+        )
+    else:
+        print("Model not found")
+        exit(1)
+
     model.load_state_dict(torch.load(args["checkpoint"]))
     model.to(device)
     model.eval()
