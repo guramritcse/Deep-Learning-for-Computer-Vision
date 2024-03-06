@@ -124,11 +124,12 @@ if not os.path.exists(results_path):
     os.makedirs(results_path)
 train_losses = []
 test_losses = []
-accuracy = []
+train_accuracy = []
+test_accuracy = []
 saved = 0
-epoch_count = 20
-model_name = "dense_net_121_unfreeze"
-augmentation = 0
+epoch_count = 30
+model_name = "dense_net_121_unfreeze_augmentation"
+augmentation = 1
 
 # Load images and set labels
 if not saved:
@@ -254,7 +255,7 @@ elif model_name == "dense_net_121_classifier":
         nn.Dropout(0.5),
         nn.Linear(512, len(class_labels))
     )
-elif model_name == "dense_net_121_unfreeze_classifier":
+elif model_name == "dense_net_121_unfreeze_classifier" or model_name == "dense_net_121_unfreeze_classifier_augmentation" :
     model = models.densenet121(pretrained=True)
     for param in model.parameters():
         param.requires_grad = False
@@ -270,7 +271,7 @@ elif model_name == "dense_net_121_unfreeze_classifier":
         nn.Dropout(0.5),
         nn.Linear(512, len(class_labels))
     )
-elif model_name == "dense_net_121_unfreeze":
+elif model_name == "dense_net_121_unfreeze" or model_name == "dense_net_121_unfreeze_augmentation":
     model = models.densenet121(pretrained=True)
     for param in model.parameters():
         param.requires_grad = False
@@ -320,6 +321,7 @@ with open(results_path + f"{model_name}_{epoch_count}_log.txt", "w") as log_file
             _, predicted = torch.max(outputs, 1)
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
+        train_accuracy.append(100 * correct / total)
         print(f"[Epoch {epoch + 1}] train loss: {running_loss / len(train_loader):.6f}")
         print(f"[Epoch {epoch + 1}] train accuracy: {100 * correct / total:.4f}%")
         log_file.write(f"[Epoch {epoch + 1}] train loss: {running_loss / len(train_loader):.6f}\n")
@@ -341,7 +343,7 @@ with open(results_path + f"{model_name}_{epoch_count}_log.txt", "w") as log_file
                 _, predicted = torch.max(outputs, 1)
                 total += labels.size(0)
                 correct += (predicted == labels).sum().item()
-        accuracy.append(100 * correct / total)
+        test_accuracy.append(100 * correct / total)
         test_losses.append(running_loss / len(test_loader))
         print(f"[Epoch {epoch + 1}] test loss: {running_loss / len(test_loader):.6f}")
         print(f"[Epoch {epoch + 1}] test accuracy: {100 * correct / total:.4f}%")
@@ -363,17 +365,19 @@ print(f"Final accuracy on the test images: {100 * correct / total:.4f}%")
 torch.save(model.state_dict(), results_path + f"{model_name}_{epoch_count}_last_checkpoint.pth")
 
 # Plot loss
-plt.plot(np.arange(epoch_count), train_losses, label="Train Loss", ls='-', marker='*', c='hotpink', ms=6, mec='g')
-plt.plot(np.arange(epoch_count), test_losses, label="Test Loss", ls='-', marker='d', c='teal', ms=6, mec='orchid')
+plt.plot(np.arange(1, epoch_count+1), train_losses, label="Train Loss", ls='-', marker='o', c='hotpink', ms=6, mec='g')
+plt.plot(np.arange(1, epoch_count+1), test_losses, label="Test Loss", ls='-', marker='*', c='teal', ms=8, mec='orchid')
 plt.xlabel("Epoch")
 plt.ylabel("Loss")
 plt.legend()
 plt.grid(axis='y', alpha=0.75, ls='--', c='c', lw=0.5)
 plt.savefig(results_path + f"{model_name}_{epoch_count}_loss.png")
 plt.clf()
-plt.plot(np.arange(epoch_count), accuracy, label="Accuracy", ls='-', marker='o', c='b', ms=6, mec='g')
+plt.plot(np.arange(1, epoch_count+1), train_accuracy, label="Train Accuracy", ls='-', marker='o', c='red', ms=6, mec='black')
+plt.plot(np.arange(1, epoch_count+1), test_accuracy, label="Test Accuracy", ls='-', marker='*', c='purple', ms=8, mec='orange')
 plt.xlabel("Epoch")
 plt.ylabel("Accuracy")
+plt.yticks(range(0, 101, 10))
 plt.legend()
 plt.grid(axis='y', alpha=0.75, ls='--', c='c', lw=0.5)
 plt.savefig(results_path + f"{model_name}_{epoch_count}_accuracy.png")
