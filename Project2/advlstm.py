@@ -7,7 +7,7 @@ from skimage.io import imread, imsave
 from utils import downscale_image, psnr_between_folders
 import matplotlib.pyplot as plt
 
-# Define the ConvLSTM cell
+# ConvLSTM cell
 class ConvLSTMCell(nn.Module):
     def __init__(self, input_channels, hidden_channels, kernel_size):
         super(ConvLSTMCell, self).__init__()
@@ -16,6 +16,7 @@ class ConvLSTMCell(nn.Module):
         self.kernel_size = kernel_size
         self.padding = kernel_size // 2
 
+        # A convolutional layer that takes the input and hidden states and returns the concatenated output
         self.conv = nn.Conv2d(in_channels=self.input_channels + self.hidden_channels,
                               out_channels=4 * self.hidden_channels,
                               kernel_size=self.kernel_size,
@@ -24,21 +25,25 @@ class ConvLSTMCell(nn.Module):
     def forward(self, input_tensor, cur_state):
         h_cur, c_cur = cur_state
 
+        # Concatenate the input tensor and the hidden state
         combined = torch.cat([input_tensor, h_cur], dim=1)
         combined_conv = self.conv(combined)
+        # Split the combined convolutional output into 4 parts
         cc_i, cc_f, cc_o, cc_g = torch.split(combined_conv, self.hidden_channels, dim=1)
 
+        # Apply the activation functions
         i = torch.sigmoid(cc_i)
         f = torch.sigmoid(cc_f)
         o = torch.sigmoid(cc_o)
         g = torch.tanh(cc_g)
 
+        # Compute the next cell state and hidden state
         c_next = f * c_cur + i * g
         h_next = o * torch.tanh(c_next)
 
         return h_next, c_next
 
-# Define the ConvLSTM deblurring model
+# AdvLSTM deblurring model
 class AdvLSTMDeblur(nn.Module):
     def __init__(self, input_channels, hidden_channels, num_layers, kernel_size):
         super(AdvLSTMDeblur, self).__init__()
@@ -53,29 +58,34 @@ class AdvLSTMDeblur(nn.Module):
             input_dim = self.input_channels if i == 0 else self.hidden_channels
             self.conv_lstm_layers.append(ConvLSTMCell(input_dim, self.hidden_channels, self.kernel_size))
 
-        # Output layer
+        # Define the output layer
         self.output_layer = nn.Conv2d(self.hidden_channels, self.input_channels, kernel_size=3, padding=1)
 
     def forward(self, x):
-        batch_size, channels, height, width = x.size()  # Updated line
-        seq_length = 1  # Assume single-frame input
+        batch_size, channels, height, width = x.size()
+        # Sequence length is 1 since image deblurring is a single frame task
+        seq_length = 1
 
-        # Add a dummy dimension for sequence length
-        x = x.unsqueeze(1)  # Add dimension at index 1
+        # Add a dimension for sequence length
+        x = x.unsqueeze(1)
 
+        # Initialize hidden and cell states for each layer
         h_states = [torch.zeros(batch_size, self.hidden_channels, height, width).to(x.device) for _ in range(self.num_layers)]
         c_states = [torch.zeros(batch_size, self.hidden_channels, height, width).to(x.device) for _ in range(self.num_layers)]
 
+        # Iterate over the sequence length
         for t in range(seq_length):
             input_data = x[:, t, :, :, :]
+            # Iterate over the layers and get the hidden and cell states
             for layer_idx in range(self.num_layers):
                 h_states[layer_idx], c_states[layer_idx] = self.conv_lstm_layers[layer_idx](input_data, (h_states[layer_idx], c_states[layer_idx]))
                 input_data = h_states[layer_idx]
 
-        out = self.output_layer(h_states[-1])  # Take the output from the last layer
+        # Finally apply the output layer to the last hidden state
+        out = self.output_layer(h_states[-1])
         return out
 
-
+# Plot the losses and PSNR values
 def plot_losses(losses, psnrs, batch_size, model):
     epoch_count = len(losses)
     plt.plot(np.arange(1, epoch_count+1), losses, label="Train Loss", ls='-', marker='o', c='hotpink', ms=6, mec='g')
@@ -93,6 +103,7 @@ def plot_losses(losses, psnrs, batch_size, model):
     plt.savefig(f"{model.__class__.__name__}_test_psnr_{batch_size}_{model.num_layers}.png")
     plt.clf()
     
+# Train the model
 def train(model, train_loader, batch_size, loss_fn, optimizer, num_epochs, device):
     model = model.to(device)
     model.train()
@@ -109,6 +120,7 @@ def train(model, train_loader, batch_size, loss_fn, optimizer, num_epochs, devic
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
+        # Save the model with the best loss and PSNR values
         if loss.item() < prev_loss:
             print("Best loss checkpoint saved at epoch ", epoch+1)
             torch.save(model.state_dict(), f"{model.__class__.__name__}_best_loss_checkpoint_{batch_size}_{model.num_layers}.pth")
@@ -128,12 +140,15 @@ def train(model, train_loader, batch_size, loss_fn, optimizer, num_epochs, devic
         print(f"Epoch {epoch+1}, PSNR: {psnr_val}")
     print("Training complete")
 
+# Get the loss function
 def get_loss_function():
     return nn.MSELoss()
 
+# Get the optimizer
 def get_optimizer(model):
     return torch.optim.Adam(model.parameters(), lr=0.001)
 
+# Test the model and calculate the PSNR values
 def test_psnr(model, device, folder2="mp2_test/custom_test/output/"):
     folder1 = "mp2_test/custom_test/sharp/"
     folder3 = "mp2_test/custom_test/blur/"

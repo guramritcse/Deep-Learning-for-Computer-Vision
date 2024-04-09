@@ -10,6 +10,7 @@ from torch.utils.data import DataLoader
 from torch.utils.data import TensorDataset
 
 
+# Set seed for reproducibility
 def set_seed(seed):
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -18,11 +19,12 @@ def set_seed(seed):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-
+# Downscale images to 256x448
 def downscale_image(image, size=(256, 448)):
     return transform.resize(image, size, anti_aliasing=True, preserve_range=False)
 
 
+# Create a Gaussian kernel of size x size and standard deviation sigma
 def create_gaussian_kernel(size, sigma):
     ax = np.linspace(-(size - 1) / 2., (size - 1) / 2., size)
     gauss = np.exp(-0.5 * np.square(ax) / np.square(sigma))
@@ -30,6 +32,7 @@ def create_gaussian_kernel(size, sigma):
     return kernel / np.sum(kernel)
 
 
+# Apply a Gaussian filter to an image
 def apply_gaussian_filter(image, sigma, kernel_size):
     kernel = create_gaussian_kernel(kernel_size, sigma)
     padded_image = np.pad(image, (((kernel_size-1)//2, (kernel_size-1)//2), ((kernel_size-1)//2, (kernel_size-1)//2), (0, 0)), mode='constant', constant_values=0)
@@ -39,6 +42,7 @@ def apply_gaussian_filter(image, sigma, kernel_size):
     return convolved_image
 
 
+# Preprocess images i.e. downscale and apply 3 Gaussian filters
 def preprocess(folder, categories, limit=-1, step = 1, saved=0, to_save=0):
     if saved == 1:
         X_train = torch.load("X_train.pt")
@@ -70,8 +74,6 @@ def preprocess(folder, categories, limit=-1, step = 1, saved=0, to_save=0):
                     total += 1
                 if total == limit:
                     break
-            #     break
-            # break
         X_train = np.array(X_train)
         y_train = np.array(y_train)
         X_train = torch.tensor(X_train, dtype=torch.float32).permute(0, 3, 1, 2)
@@ -82,6 +84,7 @@ def preprocess(folder, categories, limit=-1, step = 1, saved=0, to_save=0):
         return X_train, y_train
 
 
+# Calculate the PSNR between two folders
 def psnr_between_folders(folder1, folder2):
     psnr_values = []
     
@@ -101,6 +104,8 @@ def psnr_between_folders(folder1, folder2):
     print("Number of test images: ", len(psnr_values))
     return avg_psnr
 
+
+# Get the DataLoader object for given X, y and batch_size
 def get_data_loader(X, y, batch_size):
     return DataLoader(TensorDataset(X, y), batch_size=batch_size, shuffle=True, num_workers=6)
 
