@@ -164,6 +164,6 @@ def test_psnr(model, device, folder2="mp2_test/custom_test/output/"):
     return avg_psnr
 
 if __name__ == '__main__':
-    model = AdvLSTMDeblur(input_channels=3, hidden_channels=64, num_layers=3, kernel_size=3)
+    model = AdvLSTMDeblur(input_channels=3, hidden_channels=64, num_layers=4, kernel_size=3)
     print(model)
     print("Total number of parameters: ", sum(p.numel() for p in model.parameters()))
