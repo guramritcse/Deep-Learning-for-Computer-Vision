@@ -33,14 +33,17 @@ if __name__ == '__main__':
             sys.exit()
         checkpoint = args["checkpoint"]
         print("Checkpoint file: ", checkpoint)
-        toks = checkpoint.split("_")
+        checkpoint_name = checkpoint.split("/")[-1]
+        toks = checkpoint_name.split("_")
         model_name = toks[0]
         if model_name == "ConvLSTMDeblur":
+            print("Testing ConvLSTMDeblur model")
             model = lstm.ConvLSTMDeblur(input_channels=3, hidden_channels=64, kernel_size=3)
             model.load_state_dict(torch.load(checkpoint))
             model = model.to(device)
             avg_psnr = lstm.test_psnr(model, device, "mp2_test/custom_test/testing/")
         elif model_name == "AdvLSTMDeblur":
+            print("Testing AdvLSTMDeblur model")
             layers = int(toks[-1].split(".")[0])
             model = advlstm.AdvLSTMDeblur(input_channels=3, hidden_channels=64, num_layers=layers, kernel_size=3)
             model.load_state_dict(torch.load(checkpoint))
