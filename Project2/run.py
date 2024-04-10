@@ -84,15 +84,11 @@ if __name__ == '__main__':
         optimizer = lstm.get_optimizer(model)
         # Train the model
         lstm.train(model, train_loader, batch_size, loss_fn, optimizer, num_epochs, device)
-        # Test the model
-        avg_psnr = lstm.test_psnr(model, device, f"mp2_test/custom_test/output_{model.__class__.__name__}_{batch_size}_{model.num_layers}/")
     elif model.__class__.__name__ == "AdvLSTMDeblur":
         loss_fn = advlstm.get_loss_function()
         optimizer = advlstm.get_optimizer(model)
         # Train the model
         advlstm.train(model, train_loader, batch_size, loss_fn, optimizer, num_epochs, device)
-        # Test the model
-        avg_psnr = advlstm.test_psnr(model, device, f"mp2_test/custom_test/output_{model.__class__.__name__}_{batch_size}_{model.num_layers}/")
     else:
         print("Invalid model name")
         exit()
