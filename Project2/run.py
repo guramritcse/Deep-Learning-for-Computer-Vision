@@ -66,8 +66,8 @@ if __name__ == '__main__':
     train_loader = get_data_loader(X_train, y_train, batch_size)
     print("Images loaded")
     print("Number of training images: ", len(X_train))
-    model = lstm.ConvLSTMDeblur(input_channels=3, hidden_channels=64, kernel_size=3)
-    # model = advlstm.AdvLSTMDeblur(input_channels=3, hidden_channels=64, num_layers=num_layers, kernel_size=3)
+    # model = lstm.ConvLSTMDeblur(input_channels=3, hidden_channels=64, kernel_size=3)
+    model = advlstm.AdvLSTMDeblur(input_channels=3, hidden_channels=64, num_layers=num_layers, kernel_size=3)
 
     print("Model: ", model.__class__.__name__)
     print("Batch size: ", batch_size)
