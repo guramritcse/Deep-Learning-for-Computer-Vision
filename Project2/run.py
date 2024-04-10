@@ -95,5 +95,3 @@ if __name__ == '__main__':
     else:
         print("Invalid model name")
         exit()
-
-    print(f"Average PSNR between corresponding images: {avg_psnr} dB")
